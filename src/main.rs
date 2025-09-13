@@ -1,4 +1,30 @@
 
+#[allow(unused)]
+mod time_keeper {
+    use std::time::{Instant, Duration};
+
+    pub struct TimeKeeper {
+        start_time: Instant,
+        time_threshold: Duration,
+    }
+
+    impl TimeKeeper {
+        /// 制限時間を指定してTimeKeeperを作成する
+        /// * `time_threshold` - 時間制限(msec)
+        pub fn new(time_threshold: u64) -> Self {
+            Self {
+                start_time: Instant::now(),
+                time_threshold: Duration::from_millis(time_threshold),
+            }
+        }
+
+        /// 制限時間を超過したか判定
+        pub fn is_time_over(&self) -> bool {
+            let now = Instant::now();
+            now - self.start_time >= self.time_threshold
+        }
+    }
+}
 
 use proconio;
 
@@ -16,6 +42,15 @@ macro_rules! interactive_input(($($tt:tt)*) => (
 ));
 */
 use proconio::input;
+use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+const SEED: u64 = 0;
+
+static RAND_GEN: Lazy<Mutex<StdRng>> = Lazy::new(|| {
+    Mutex::new(StdRng::seed_from_u64(80))
+});
+
 
 lazy_static! {
     static ref TILES: Vec<usize> = {
@@ -120,7 +155,7 @@ impl DfsSolver {
         self.score = 0;
         self.visiteds.fill(false);
         self.path.clear();
-        self.remaining_search_count = 40000;
+        self.remaining_search_count = 4000;
         self.dfs(first_coord);
     }
 
@@ -152,6 +187,120 @@ impl DfsSolver {
     }
 }
 
+struct DfsPartSolver<'a> {
+    visiteds: &'a mut [bool; TILE_NUM],
+    path: State,
+    best_path: State,
+    score: i64,
+    best_score: i64,
+    remaining_search_count: i64,
+    goal: usize,
+}
+
+impl<'a> DfsPartSolver<'a> {
+    fn new(visited: &'a mut [bool; TILE_NUM]) -> Self {
+        Self { visiteds: visited, path: State::new(), best_path: State::new(), score: 0, best_score: 0, remaining_search_count: 0, goal: 0 }
+    }
+
+    fn start(&mut self, start: usize, goal: usize,  remaining_search_count: i64) {
+        self.goal = goal;
+        self.best_path.clear();
+        self.best_score = 0;
+        self.score = 0;
+        self.path.clear();
+        self.remaining_search_count = remaining_search_count;
+        self.dfs(start);
+    }
+
+    fn dfs(&mut self, coord: usize) {
+        if !self.visiteds[TILES[coord]] {
+            self.path.push(coord);
+            self.score += POINTS[coord];
+            self.visiteds[TILES[coord]] = true;
+        }
+        self.remaining_search_count -= 1;
+        if self.remaining_search_count <= 0 {
+            return;
+        }
+
+        let mut legal_next_coords = Vec::<usize>::new();
+        for &next_coord in &NEXT_COORDS[coord] {
+            if !self.visiteds[TILES[next_coord]] {
+                legal_next_coords.push(next_coord);
+            } else if next_coord == self.goal {
+                self.best_score = self.score;
+                self.best_path = self.path.clone();
+                self.remaining_search_count = 0;
+                return;
+            }
+        }
+        let mut rng = rand::thread_rng();
+        legal_next_coords.shuffle(&mut rng);
+        for &next_coord in &legal_next_coords {
+            if self.visiteds[TILES[next_coord]] {continue;}
+            self.dfs(next_coord);
+            if self.remaining_search_count <= 0 {return;}
+        }
+
+        self.path.pop();
+        self.score -= POINTS[coord];
+        self.visiteds[TILES[coord]] = false;
+    }
+}
+
+fn hill_climb_with_time_threshold(time_threshold: u64, first_coord: usize) -> State {
+    let time_keeper = time_keeper::TimeKeeper::new(time_threshold);
+
+    let mut dfs_solver = DfsSolver::new();
+    dfs_solver.start(first_coord);
+
+    let mut now_path = dfs_solver.best_path;
+    let mut now_visited = [false; TILE_NUM];
+    for &coord in &now_path.path {
+        now_visited[TILES[coord]] = true;
+    }
+
+    loop {
+        if time_keeper.is_time_over() {break;}
+
+        let mut rng = RAND_GEN.lock().unwrap();
+        let ub_len = (now_path.path.len() as f64 * 0.05) as usize;
+        let delete_path_length = rng.gen_range(1..ub_len);
+        let start_path_id = rng.gen_range(0..(now_path.path.len() - delete_path_length));
+        let end_path_id = start_path_id + delete_path_length;
+
+        let mut next_visited = now_visited.clone();
+        let remaining_search_count= 4 * delete_path_length as i64;
+
+        let mut now_score = 0i64;
+        for &coord in &now_path.path[(start_path_id+1)..end_path_id] {
+            now_score += POINTS[coord];
+            next_visited[TILES[coord]] = false;
+        }
+        let mut dfs_part_solver = DfsPartSolver::new(&mut next_visited);
+        dfs_part_solver.start(now_path.path[start_path_id], now_path.path[end_path_id], remaining_search_count);
+
+        let next_score = dfs_part_solver.best_score;
+        let diff = next_score - now_score;
+        if dfs_part_solver.best_path.path.len() > 0 && diff > 0 {
+            now_visited = *dfs_part_solver.visiteds;
+
+            let mut transitioned_path = Vec::<usize>::new();
+            for &coord in &now_path.path[0..=start_path_id] {
+                transitioned_path.push(coord);
+            }
+            for &coord in &dfs_part_solver.best_path.path {
+                transitioned_path.push(coord);
+            }
+            for &coord in &now_path.path[end_path_id..] {
+                transitioned_path.push(coord);
+            }
+            now_path.path = transitioned_path;
+        }
+    }
+    now_path
+}
+
 fn main() {
     input! {
         si: usize,
@@ -163,8 +312,6 @@ fn main() {
     lazy_static::initialize(&NEXT_COORDS);
 
     let first_coord = si * W + sj;
-    let mut dfs_solver = DfsSolver::new();
-    dfs_solver.start(first_coord);
-    let ans = dfs_solver.best_path.output();
-    println!("{}", ans);
+    let ans_path = hill_climb_with_time_threshold(1950, first_coord);
+    println!("{}", ans_path.output());
 }
