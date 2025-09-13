@@ -1,8 +1,6 @@
 
 
 use proconio;
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
 
 const H: usize = 50;
 const W: usize = 50;
@@ -20,8 +18,8 @@ macro_rules! interactive_input(($($tt:tt)*) => (
 use proconio::input;
 
 lazy_static! {
-    static ref TILES: Vec<i64> = {
-        input! {tiles: [i64; TILE_NUM as usize]}
+    static ref TILES: Vec<usize> = {
+        input! {tiles: [usize; TILE_NUM as usize]}
         tiles
     };
     static ref POINTS: Vec<i64> = {
@@ -55,11 +53,30 @@ fn initialize_global_info() -> Vec<Vec<usize>> {
     next_coords
 }
 
+#[derive(Clone)]
 struct State {
     path: Vec<usize>
 }
 
 impl State {
+    fn new() -> Self {
+        Self {
+            path: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, coord: usize) {
+        self.path.push(coord);
+    }
+
+    fn pop(&mut self) {
+        self.path.pop();
+    }
+
+    fn clear(&mut self) {
+        self.path.clear();
+    }
+
     fn output(&self) -> String {
         let mut res = String::new();
         for i in 0..self.path.len()-1 {
@@ -77,6 +94,64 @@ impl State {
     }
 }
 
+struct DfsSolver {
+    visiteds: [bool; TILE_NUM],
+    path: State,
+    best_path: State,
+    score: i64,
+    best_score: i64,
+    remaining_search_count: i64,
+}
+
+impl DfsSolver {
+    fn new() -> Self {
+        Self {
+            visiteds: [false; TILE_NUM],
+            path: State::new(),
+            best_path: State::new(),
+            score: 0,
+            best_score: 0,
+            remaining_search_count: 0,
+        }
+    }
+
+    fn start(&mut self, first_coord: usize) {
+        self.best_path.clear();
+        self.score = 0;
+        self.visiteds.fill(false);
+        self.path.clear();
+        self.remaining_search_count = 40000;
+        self.dfs(first_coord);
+    }
+
+    fn dfs(&mut self, coord: usize) {
+        self.path.push(coord);
+        self.score += POINTS[coord];
+        self.visiteds[TILES[coord]] = true;
+        if self.best_score < self.score {
+            self.best_score = self.score;
+            self.best_path = self.path.clone();
+        }
+        self.remaining_search_count -= 1;
+        if self.remaining_search_count <= 0 {return;}
+
+        // eprintln!("now: {}", self.path.output());
+        // eprintln!("now_coord: {coord}, tile: {}", TILES[coord]);
+
+        for &next_coord in &NEXT_COORDS[coord] {
+            // eprintln!("\tnext_coord: {next_coord}, tile: {}", TILES[next_coord]);
+            if self.visiteds[TILES[next_coord]] {continue;}
+            // eprintln!("\t go");
+            self.dfs(next_coord);
+            if self.remaining_search_count <= 0 {return;}
+        }
+
+        self.path.pop();
+        self.score -= POINTS[coord];
+        self.visiteds[TILES[coord]] = false;
+    }
+}
+
 fn main() {
     input! {
         si: usize,
@@ -87,5 +162,9 @@ fn main() {
     lazy_static::initialize(&POINTS);
     lazy_static::initialize(&NEXT_COORDS);
 
-    println!("{} {}", TILES[0], POINTS[0]);
+    let first_coord = si * W + sj;
+    let mut dfs_solver = DfsSolver::new();
+    dfs_solver.start(first_coord);
+    let ans = dfs_solver.best_path.output();
+    println!("{}", ans);
 }
