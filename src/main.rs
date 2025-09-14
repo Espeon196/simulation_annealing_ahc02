@@ -200,20 +200,22 @@ struct DfsPartSolver<'a> {
     best_score: i64,
     remaining_search_count: i64,
     goal: usize,
+    next_score_min_threshold: i64,
 }
 
 impl<'a> DfsPartSolver<'a> {
     fn new(visited: &'a mut [bool; TILE_NUM]) -> Self {
-        Self { visiteds: visited, path: State::new(), best_path: State::new(), score: 0, best_score: 0, remaining_search_count: 0, goal: 0 }
+        Self { visiteds: visited, path: State::new(), best_path: State::new(), score: 0, best_score: 0, remaining_search_count: 0, goal: 0, next_score_min_threshold: 0 }
     }
 
-    fn start(&mut self, start: usize, goal: usize,  remaining_search_count: i64) {
+    fn start(&mut self, start: usize, goal: usize,  remaining_search_count: i64, next_score_min_threshold: i64) {
         self.goal = goal;
         self.best_path.clear();
         self.best_score = 0;
         self.score = 0;
         self.path.clear();
         self.remaining_search_count = remaining_search_count;
+        self.next_score_min_threshold = next_score_min_threshold;
         self.dfs(start);
     }
 
@@ -233,10 +235,12 @@ impl<'a> DfsPartSolver<'a> {
             if !self.visiteds[TILES[next_coord]] {
                 legal_next_coords.push(next_coord);
             } else if next_coord == self.goal {
-                self.best_score = self.score;
-                self.best_path = self.path.clone();
-                self.remaining_search_count = 0;
-                return;
+                if self.score > self.next_score_min_threshold {
+                    self.best_score = self.score;
+                    self.best_path = self.path.clone();
+                    self.remaining_search_count = 0;
+                    return;
+                }
             }
         }
         let mut rng = rand::thread_rng();
@@ -270,8 +274,10 @@ fn simulated_annealing_with_time_threshold(time_threshold: u64, first_coord: usi
 
         // 焼きなまし法における温度を決定
         let temp = start_temp as f64 + (end_temp - start_temp) as f64 * time_keeper.get_progress();
-
         let mut rng = RAND_GEN.lock().unwrap();
+        let prob: f64 = rng.r#gen();
+        let diff_threshold = (temp * prob.ln()).round() as i64;
+
         let ub_len = (now_path.path.len() as f64 * 0.05) as usize;
         let delete_path_length = rng.gen_range(1..ub_len);
         let start_path_id = rng.gen_range(0..(now_path.path.len() - delete_path_length));
@@ -285,13 +291,15 @@ fn simulated_annealing_with_time_threshold(time_threshold: u64, first_coord: usi
             now_score += POINTS[coord];
             next_visited[TILES[coord]] = false;
         }
+        let next_score_min_threshold = now_score + diff_threshold;
+
         let mut dfs_part_solver = DfsPartSolver::new(&mut next_visited);
-        dfs_part_solver.start(now_path.path[start_path_id], now_path.path[end_path_id], remaining_search_count);
+        dfs_part_solver.start(now_path.path[start_path_id], now_path.path[end_path_id], remaining_search_count, next_score_min_threshold);
 
         let next_score = dfs_part_solver.best_score;
         let diff = next_score - now_score;
         // 確率で反映させる
-        if dfs_part_solver.best_path.path.len() > 0 && (diff as f64 / temp).exp() > rng.r#gen() {
+        if dfs_part_solver.best_path.path.len() > 0 && diff > diff_threshold {
             now_visited = *dfs_part_solver.visiteds;
 
             let mut transitioned_path = Vec::<usize>::new();
