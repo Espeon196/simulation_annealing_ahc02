@@ -18,6 +18,12 @@ mod time_keeper {
             }
         }
 
+        pub fn get_progress(&self) -> f64 {
+            let now = Instant::now();
+            let diff = now - self.start_time;
+            diff.as_millis() as f64 / self.time_threshold.as_millis() as f64
+        }
+
         /// 制限時間を超過したか判定
         pub fn is_time_over(&self) -> bool {
             let now = Instant::now();
@@ -45,7 +51,6 @@ use proconio::input;
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
-const SEED: u64 = 0;
 
 static RAND_GEN: Lazy<Mutex<StdRng>> = Lazy::new(|| {
     Mutex::new(StdRng::seed_from_u64(80))
@@ -248,7 +253,7 @@ impl<'a> DfsPartSolver<'a> {
     }
 }
 
-fn hill_climb_with_time_threshold(time_threshold: u64, first_coord: usize) -> State {
+fn simulated_annealing_with_time_threshold(time_threshold: u64, first_coord: usize, start_temp: i64, end_temp: i64) -> State {
     let time_keeper = time_keeper::TimeKeeper::new(time_threshold);
 
     let mut dfs_solver = DfsSolver::new();
@@ -262,6 +267,9 @@ fn hill_climb_with_time_threshold(time_threshold: u64, first_coord: usize) -> St
 
     loop {
         if time_keeper.is_time_over() {break;}
+
+        // 焼きなまし法における温度を決定
+        let temp = start_temp as f64 + (end_temp - start_temp) as f64 * time_keeper.get_progress();
 
         let mut rng = RAND_GEN.lock().unwrap();
         let ub_len = (now_path.path.len() as f64 * 0.05) as usize;
@@ -282,7 +290,8 @@ fn hill_climb_with_time_threshold(time_threshold: u64, first_coord: usize) -> St
 
         let next_score = dfs_part_solver.best_score;
         let diff = next_score - now_score;
-        if dfs_part_solver.best_path.path.len() > 0 && diff > 0 {
+        // 確率で反映させる
+        if dfs_part_solver.best_path.path.len() > 0 && (diff as f64 / temp).exp() > rng.r#gen() {
             now_visited = *dfs_part_solver.visiteds;
 
             let mut transitioned_path = Vec::<usize>::new();
@@ -312,6 +321,6 @@ fn main() {
     lazy_static::initialize(&NEXT_COORDS);
 
     let first_coord = si * W + sj;
-    let ans_path = hill_climb_with_time_threshold(1950, first_coord);
+    let ans_path = simulated_annealing_with_time_threshold(1950, first_coord, 150, 0);
     println!("{}", ans_path.output());
 }
