@@ -286,6 +286,9 @@ fn simulated_annealing_with_time_threshold(time_threshold: u64, first_coord: usi
         let mut next_visited = now_visited.clone();
         let remaining_search_count= 4 * delete_path_length as i64;
 
+        // 50%の確率で逆順探索する
+        let rev = rng.r#gen::<f64>() < 0.5;
+
         let mut now_score = 0i64;
         for &coord in &now_path.path[(start_path_id+1)..end_path_id] {
             now_score += POINTS[coord];
@@ -294,7 +297,11 @@ fn simulated_annealing_with_time_threshold(time_threshold: u64, first_coord: usi
         let next_score_min_threshold = now_score + diff_threshold;
 
         let mut dfs_part_solver = DfsPartSolver::new(&mut next_visited);
-        dfs_part_solver.start(now_path.path[start_path_id], now_path.path[end_path_id], remaining_search_count, next_score_min_threshold);
+        if rev {
+            dfs_part_solver.start(now_path.path[end_path_id], now_path.path[start_path_id], remaining_search_count, next_score_min_threshold);
+        } else {
+            dfs_part_solver.start(now_path.path[start_path_id], now_path.path[end_path_id], remaining_search_count, next_score_min_threshold);
+        }
 
         let next_score = dfs_part_solver.best_score;
         let diff = next_score - now_score;
@@ -306,8 +313,14 @@ fn simulated_annealing_with_time_threshold(time_threshold: u64, first_coord: usi
             for &coord in &now_path.path[0..=start_path_id] {
                 transitioned_path.push(coord);
             }
-            for &coord in &dfs_part_solver.best_path.path {
-                transitioned_path.push(coord);
+            if rev {
+                for &coord in dfs_part_solver.best_path.path.iter().rev() {
+                    transitioned_path.push(coord);
+                }
+            } else {
+                for &coord in &dfs_part_solver.best_path.path {
+                    transitioned_path.push(coord);
+                }    
             }
             for &coord in &now_path.path[end_path_id..] {
                 transitioned_path.push(coord);
